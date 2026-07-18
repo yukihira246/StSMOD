@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>MagicIndustry.LunasSweetKingdom.RC9</AssemblyName>
+    <RootNamespace>MagicIndustry.LunasSweetKingdom</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../StubAssemblyCSharp/StubAssemblyCSharp.csproj" Private="false" />
+  </ItemGroup>
+</Project>
