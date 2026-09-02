@@ -1,6 +1,8 @@
 package hololivemod.patches;
 
 import basemod.ReflectionHacks;
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.files.FileHandle;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
@@ -11,21 +13,28 @@ import com.megacrit.cardcrawl.core.Settings;
 import com.megacrit.cardcrawl.helpers.ImageMaster;
 import com.megacrit.cardcrawl.screens.SingleCardViewPopup;
 
+import java.io.File;
+
 /**
  * Foundation/Rindou-style layered full-art test for Hololive_Strike.
  *
  * Gameplay is untouched. The visual surface is composed as:
- *   art -> transparent frame -> transparent rarity marker -> vanilla text/cost.
+ *   art -> transparent frame -> transparent rarity marker -> text/cost.
  *
  * Foundation baseline:
  *   normal art : 296 x 414
  *   detail art : 600 x 840
  *   frame      : 512 x 512 / 1024 x 1024 transparent PNG
+ *
+ * v0.0.6 also accepts an external test image at:
+ *   SlayTheSpire/mods/hololive_fullart_test_chloe.png
+ * If it is absent, the embedded checker image remains as fallback.
  */
 public final class FullArtTestPatch {
     private static final String TEST_CARD_ID = "Hololive_Strike";
 
     private static final String ART_PATH = "img/card/fullart/fullart_test.png";
+    private static final String EXTERNAL_ART_PATH = "mods/hololive_fullart_test_chloe.png";
     private static final String FRAME_512_PATH = "img/card/fullart/frame_attack_512.png";
     private static final String FRAME_1024_PATH = "img/card/fullart/frame_attack_1024.png";
     private static final String RARITY_512_PATH = "img/card/fullart/rarity_special_512.png";
@@ -60,8 +69,29 @@ public final class FullArtTestPatch {
         return current != null ? current : ImageMaster.loadImage(path);
     }
 
+    private static Texture tryLoadExternalArt() {
+        try {
+            File file = new File(EXTERNAL_ART_PATH);
+            if (!file.isFile()) {
+                return null;
+            }
+            FileHandle handle = Gdx.files.absolute(file.getAbsolutePath());
+            if (!handle.exists()) {
+                return null;
+            }
+            return new Texture(handle);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
     private static Texture art() {
-        art = load(art, ART_PATH);
+        if (art == null) {
+            art = tryLoadExternalArt();
+            if (art == null) {
+                art = ImageMaster.loadImage(ART_PATH);
+            }
+        }
         return art;
     }
 
@@ -135,12 +165,10 @@ public final class FullArtTestPatch {
     private static void drawNormalArt(SpriteBatch sb, AbstractCard card) {
         float alpha = card.transparency;
 
-        // Neutral underlay only covers any letterbox area left by CONTAIN fitting.
         drawCardTexture(sb, card, ImageMaster.WHITE_SQUARE_IMG,
                 NORMAL_BASE_W, NORMAL_BASE_H,
                 new Color(0.018F, 0.022F, 0.030F, alpha));
 
-        // Full art first.
         drawCardContain(sb, card, art(), NORMAL_ART_W, NORMAL_ART_H,
                 new Color(1.0F, 1.0F, 1.0F, alpha));
 
@@ -151,7 +179,6 @@ public final class FullArtTestPatch {
         float alpha = card.transparency;
         Color white = new Color(1.0F, 1.0F, 1.0F, alpha);
 
-        // Foundation model: frame and rarity are independent transparent layers.
         drawCardTexture(sb, card, frame512(), NORMAL_OVERLAY_SIZE, NORMAL_OVERLAY_SIZE, white);
         drawCardTexture(sb, card, rarity512(), NORMAL_OVERLAY_SIZE, NORMAL_OVERLAY_SIZE, white);
         sb.setColor(Color.WHITE);
@@ -234,10 +261,6 @@ public final class FullArtTestPatch {
         sb.setColor(Color.WHITE);
     }
 
-    /**
-     * Replace the complete vanilla image layer. Text/type/description/cost are
-     * rendered by AbstractCard afterwards, so they stay at the standard positions.
-     */
     @SpirePatch(clz = AbstractCard.class, method = "renderImage")
     public static class NormalRenderImagePatch {
         public static SpireReturn<Void> Prefix(AbstractCard __instance,
@@ -253,7 +276,6 @@ public final class FullArtTestPatch {
         }
     }
 
-    /** Large-view art layer. */
     @SpirePatch(clz = SingleCardViewPopup.class, method = "renderCardBack")
     public static class PopupCardBackPatch {
         public static SpireReturn<Void> Prefix(SingleCardViewPopup __instance, SpriteBatch sb) {
@@ -265,7 +287,6 @@ public final class FullArtTestPatch {
         }
     }
 
-    /** Normal portrait is already represented by the full art. */
     @SpirePatch(clz = SingleCardViewPopup.class, method = "renderPortrait")
     public static class PopupPortraitPatch {
         public static SpireReturn<Void> Prefix(SingleCardViewPopup __instance, SpriteBatch sb) {
@@ -273,7 +294,6 @@ public final class FullArtTestPatch {
         }
     }
 
-    /** Draw the independent 1024 frame + rarity layers at the frame stage. */
     @SpirePatch(clz = SingleCardViewPopup.class, method = "renderFrame")
     public static class PopupFramePatch {
         public static SpireReturn<Void> Prefix(SingleCardViewPopup __instance, SpriteBatch sb) {
@@ -285,7 +305,6 @@ public final class FullArtTestPatch {
         }
     }
 
-    /** Rarity is now its own layer, so suppress the vanilla banner. */
     @SpirePatch(clz = SingleCardViewPopup.class, method = "renderCardBanner")
     public static class PopupBannerPatch {
         public static SpireReturn<Void> Prefix(SingleCardViewPopup __instance, SpriteBatch sb) {
