@@ -34,13 +34,22 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf build
+          mkdir -p build/stubsrc/basemod
           mkdir -p build/stubsrc/com/evacipated/cardcrawl/modthespire/lib
           mkdir -p build/stubsrc/com/badlogic/gdx/graphics/g2d
           mkdir -p build/stubsrc/com/badlogic/gdx/graphics
           mkdir -p build/stubsrc/com/megacrit/cardcrawl/cards
           mkdir -p build/stubsrc/com/megacrit/cardcrawl/core
           mkdir -p build/stubsrc/com/megacrit/cardcrawl/helpers
+          mkdir -p build/stubsrc/com/megacrit/cardcrawl/screens
           mkdir -p build/stub-classes build/mod-classes build/resources/img/card/fullart
+
+          cat > build/stubsrc/basemod/ReflectionHacks.java <<'EOF'
+          package basemod;
+          public final class ReflectionHacks {
+              public static <T> T getPrivate(Object obj, Class<?> cls, String fieldName) { return null; }
+          }
+          EOF
 
           cat > build/stubsrc/com/evacipated/cardcrawl/modthespire/lib/SpirePatch.java <<'EOF'
           package com.evacipated.cardcrawl.modthespire.lib;
@@ -109,6 +118,8 @@ jobs:
           package com.megacrit.cardcrawl.core;
           public class Settings {
               public static float scale = 1F;
+              public static int WIDTH = 1920;
+              public static int HEIGHT = 1080;
           }
           EOF
 
@@ -119,6 +130,11 @@ jobs:
               public static Texture WHITE_SQUARE_IMG = new Texture();
               public static Texture loadImage(String path) { return new Texture(); }
           }
+          EOF
+
+          cat > build/stubsrc/com/megacrit/cardcrawl/screens/SingleCardViewPopup.java <<'EOF'
+          package com.megacrit.cardcrawl.screens;
+          public class SingleCardViewPopup {}
           EOF
 
           javac -source 8 -target 8 -d build/stub-classes $(find build/stubsrc -name '*.java')
@@ -175,8 +191,8 @@ jobs:
             "modid": "HololiveFullArtTest",
             "name": "Hololive Full Art Test",
             "author_list": ["yukihira246"],
-            "description": "Rendering-only test. Makes Hololive_Strike use a near-full-card illustration while keeping its gameplay unchanged.",
-            "version": "0.0.1",
+            "description": "Rendering-only v0.0.2 test. Replaces Hololive_Strike's vanilla blue image surface with Rindou-style full art in normal and single-card views. Gameplay is unchanged.",
+            "version": "0.0.2",
             "sts_version": "12-18-2022",
             "mts_version": "3.30.3",
             "dependencies": ["HololiveMod"]
@@ -188,16 +204,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          jar cf dist/HololiveFullArtTest-0.0.1.jar \
+          jar cf dist/HololiveFullArtTest-0.0.2.jar \
             -C build/mod-classes . \
             -C build/resources .
-          jar tf dist/HololiveFullArtTest-0.0.1.jar
+          jar tf dist/HololiveFullArtTest-0.0.2.jar
 
       - name: Upload Actions artifact
         uses: actions/upload-artifact@v4
         with:
-          name: HololiveFullArtTest-0.0.1
-          path: dist/HololiveFullArtTest-0.0.1.jar
+          name: HololiveFullArtTest-0.0.2
+          path: dist/HololiveFullArtTest-0.0.2.jar
           if-no-files-found: error
 
       - name: Publish/update test release
@@ -207,12 +223,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG='hololive-fullart-test-v0.0.1'
-          JAR='dist/HololiveFullArtTest-0.0.1.jar'
+          TAG='hololive-fullart-test-v0.0.2'
+          JAR='dist/HololiveFullArtTest-0.0.2.jar'
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$JAR" --clobber
           else
             gh release create "$TAG" "$JAR" \
-              --title 'Hololive Full Art Test v0.0.1' \
-              --notes 'Temporary rendering-only test for Hololive_Strike. Uses a generated vertical placeholder image. No card gameplay values are changed.'
+              --title 'Hololive Full Art Test v0.0.2' \
+              --notes 'Rindou-style rendering test for Hololive_Strike: vanilla blue image surface removed, 296x414 normal full art and 600x840 single-card full art, source aspect ratio preserved. No card gameplay values are changed. Placeholder art is still used for layout testing.'
           fi
