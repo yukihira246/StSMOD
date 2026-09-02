@@ -1,0 +1,253 @@
+name: Build Hololive full-art test v0.0.4
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-hololive-fullart-test-v004.yml'
+      - 'hololive-fullart-test/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+
+      - name: Prepare Java compile stubs
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build dist
+          mkdir -p build/stubsrc/basemod
+          mkdir -p build/stubsrc/com/evacipated/cardcrawl/modthespire/lib
+          mkdir -p build/stubsrc/com/badlogic/gdx/graphics/g2d
+          mkdir -p build/stubsrc/com/badlogic/gdx/graphics
+          mkdir -p build/stubsrc/com/megacrit/cardcrawl/cards
+          mkdir -p build/stubsrc/com/megacrit/cardcrawl/core
+          mkdir -p build/stubsrc/com/megacrit/cardcrawl/helpers
+          mkdir -p build/stubsrc/com/megacrit/cardcrawl/screens
+          mkdir -p build/stub-classes build/mod-classes build/resources/img/card/fullart
+
+          cat > build/stubsrc/basemod/ReflectionHacks.java <<'EOF'
+          package basemod;
+          public final class ReflectionHacks {
+              public static <T> T getPrivate(Object obj, Class<?> cls, String fieldName) { return null; }
+          }
+          EOF
+
+          cat > build/stubsrc/com/evacipated/cardcrawl/modthespire/lib/SpirePatch.java <<'EOF'
+          package com.evacipated.cardcrawl.modthespire.lib;
+          import java.lang.annotation.ElementType;
+          import java.lang.annotation.Retention;
+          import java.lang.annotation.RetentionPolicy;
+          import java.lang.annotation.Target;
+          @Retention(RetentionPolicy.RUNTIME)
+          @Target(ElementType.TYPE)
+          public @interface SpirePatch { Class<?> clz(); String method(); }
+          EOF
+
+          cat > build/stubsrc/com/evacipated/cardcrawl/modthespire/lib/SpireReturn.java <<'EOF'
+          package com.evacipated.cardcrawl.modthespire.lib;
+          public class SpireReturn<T> {
+              public static <T> SpireReturn<T> Return(T value) { return new SpireReturn<T>(); }
+              public static <T> SpireReturn<T> Continue() { return new SpireReturn<T>(); }
+          }
+          EOF
+
+          cat > build/stubsrc/com/badlogic/gdx/graphics/Color.java <<'EOF'
+          package com.badlogic.gdx.graphics;
+          public class Color {
+              public static final Color WHITE = new Color(1F,1F,1F,1F);
+              public Color(float r,float g,float b,float a) {}
+          }
+          EOF
+
+          cat > build/stubsrc/com/badlogic/gdx/graphics/Texture.java <<'EOF'
+          package com.badlogic.gdx.graphics;
+          public class Texture { public int getWidth(){return 1;} public int getHeight(){return 1;} }
+          EOF
+
+          cat > build/stubsrc/com/badlogic/gdx/graphics/g2d/SpriteBatch.java <<'EOF'
+          package com.badlogic.gdx.graphics.g2d;
+          import com.badlogic.gdx.graphics.Color;
+          import com.badlogic.gdx.graphics.Texture;
+          public class SpriteBatch {
+              public void setColor(Color c) {}
+              public void draw(Texture t,float x,float y,float ox,float oy,float w,float h,float sx,float sy,float r,int srcX,int srcY,int srcW,int srcH,boolean fx,boolean fy) {}
+          }
+          EOF
+
+          cat > build/stubsrc/com/megacrit/cardcrawl/cards/AbstractCard.java <<'EOF'
+          package com.megacrit.cardcrawl.cards;
+          public class AbstractCard {
+              public String cardID;
+              public float current_x,current_y,angle,drawScale,transparency;
+          }
+          EOF
+
+          cat > build/stubsrc/com/megacrit/cardcrawl/core/Settings.java <<'EOF'
+          package com.megacrit.cardcrawl.core;
+          public class Settings { public static float scale=1F; public static int WIDTH=1920; public static int HEIGHT=1080; }
+          EOF
+
+          cat > build/stubsrc/com/megacrit/cardcrawl/helpers/ImageMaster.java <<'EOF'
+          package com.megacrit.cardcrawl.helpers;
+          import com.badlogic.gdx.graphics.Texture;
+          public class ImageMaster {
+              public static Texture WHITE_SQUARE_IMG=new Texture();
+              public static Texture loadImage(String p){return new Texture();}
+          }
+          EOF
+
+          cat > build/stubsrc/com/megacrit/cardcrawl/screens/SingleCardViewPopup.java <<'EOF'
+          package com.megacrit.cardcrawl.screens;
+          public class SingleCardViewPopup {}
+          EOF
+
+          javac -source 8 -target 8 -d build/stub-classes $(find build/stubsrc -name '*.java')
+          javac -source 8 -target 8 -cp build/stub-classes -d build/mod-classes $(find hololive-fullart-test/src/main/java -name '*.java')
+
+      - name: Install image tools
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk
+          python3 -m pip install --quiet pillow
+
+      - name: Generate Rindou-style test visual layers
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageDraw, ImageFont
+          import glob
+
+          OUT = Path('build/resources/img/card/fullart')
+          OUT.mkdir(parents=True, exist_ok=True)
+
+          # Placeholder art remains deliberately obvious until the supplied Chloe file can be copied safely.
+          w,h = 832,1216
+          art = Image.new('RGBA',(w,h),(0,0,0,255))
+          d = ImageDraw.Draw(art)
+          tile = 64
+          for y in range(0,h,tile):
+              for x in range(0,w,tile):
+                  odd=((x//tile)+(y//tile))&1
+                  d.rectangle((x,y,min(w-1,x+tile-1),min(h-1,y+tile-1)), fill=((112 if odd else 76),(35 if odd else 22),(126 if odd else 88),255))
+          d.rectangle((w//2-3,0,w//2+3,h),fill=(238,238,238,255))
+          d.rectangle((0,h//2-3,w,h//2+3),fill=(238,238,238,255))
+          art.save(OUT/'fullart_test.png')
+
+          font_candidates = (
+              glob.glob('/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc') +
+              glob.glob('/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf') +
+              glob.glob('/usr/share/fonts/**/NotoSansCJK*.ttc', recursive=True)
+          )
+          font_path = font_candidates[0]
+          type_font = ImageFont.truetype(font_path, 18)
+          small_font = ImageFont.truetype(font_path, 13)
+
+          fw=fh=512
+          frame=Image.new('RGBA',(fw,fh),(0,0,0,0))
+          f=ImageDraw.Draw(frame)
+          # Card occupies x=106..406, y=46..466 inside the 512 transparent layer.
+          box=(106,46,406,466)
+          # Slim purple/gold border: illustration remains dominant.
+          f.rounded_rectangle((103,43,409,469), radius=22, outline=(24,10,34,235), width=9)
+          f.rounded_rectangle(box, radius=19, outline=(232,188,82,245), width=4)
+          f.rounded_rectangle((111,51,401,461), radius=15, outline=(109,50,142,220), width=2)
+
+          # Thin title band; cost remains Hololive's existing orb for now.
+          f.rounded_rectangle((139,62,390,103), radius=13, fill=(30,12,42,185), outline=(222,181,83,225), width=2)
+          f.line((154,101,375,101), fill=(124,63,155,220), width=2)
+
+          # Adopted Rindou layout: ATTACK/SKILL/POWER is a left-edge vertical frame element.
+          f.rounded_rectangle((107,146,139,282), radius=9, fill=(101,21,38,235), outline=(239,188,81,245), width=2)
+          f.rectangle((136,157,140,271), fill=(174,54,65,220))
+          # Tiny sword-like attack emblem.
+          f.line((115,163,131,179), fill=(244,224,166,255), width=3)
+          f.line((128,160,115,180), fill=(244,224,166,255), width=2)
+          f.line((114,177,119,182), fill=(244,224,166,255), width=2)
+          chars=['ア','タ','ッ','ク']
+          ys=[192,214,236,258]
+          for ch,y in zip(chars,ys):
+              bb=f.textbbox((0,0),ch,font=type_font)
+              tw=bb[2]-bb[0]
+              f.text((123-tw/2,y),ch,font=type_font,fill=(255,244,215,255),anchor='ma')
+
+          # Description panel uses the same dark-purple/gold language instead of a plain black box.
+          f.rounded_rectangle((122,327,392,440), radius=16, fill=(19,9,29,190), outline=(207,169,94,220), width=2)
+          f.line((140,329,374,329),fill=(123,59,153,210),width=2)
+
+          # Small corner ornamentation only; avoid stealing art space.
+          for x,y,sx,sy in [(116,58,1,1),(396,58,-1,1),(116,454,1,-1),(396,454,-1,-1)]:
+              f.line((x,y,x+sx*18,y), fill=(229,186,83,220), width=2)
+              f.line((x,y,x,y+sy*18), fill=(229,186,83,220), width=2)
+
+          frame.save(OUT/'frame_attack_512.png')
+          frame.resize((1024,1024),Image.Resampling.LANCZOS).save(OUT/'frame_attack_1024.png')
+
+          # Rarity is independent and bottom-right, matching the old Foundation/Rindou layer rule.
+          # Strike is SPECIAL in HololiveMod; its exact old Rindou asset was not recovered, so this S gem is explicitly a test marker.
+          rarity=Image.new('RGBA',(512,512),(0,0,0,0))
+          r=ImageDraw.Draw(rarity)
+          cx,cy=385,447
+          pts=[(cx,cy-14),(cx+14,cy),(cx,cy+14),(cx-14,cy)]
+          r.polygon(pts,fill=(31,13,42,245),outline=(237,190,79,255))
+          r.polygon([(cx,cy-9),(cx+9,cy),(cx,cy+9),(cx-9,cy)],fill=(119,53,151,245),outline=(255,226,147,255))
+          bb=r.textbbox((0,0),'S',font=small_font)
+          r.text((cx-(bb[2]-bb[0])/2,cy-(bb[3]-bb[1])/2-1),'S',font=small_font,fill=(255,247,220,255))
+          rarity.save(OUT/'rarity_special_512.png')
+          rarity.resize((1024,1024),Image.Resampling.LANCZOS).save(OUT/'rarity_special_1024.png')
+          PY
+
+      - name: Write metadata and package
+        shell: bash
+        run: |
+          cat > build/resources/ModTheSpire.json <<'EOF'
+          {
+            "modid": "HololiveFullArtTest",
+            "name": "Hololive Full Art Test",
+            "author_list": ["yukihira246"],
+            "description": "v0.0.4 Rindou layout recovery test: slim purple/gold full-art frame, left vertical ATTACK strip, bottom-right independent rarity overlay. Hololive_Strike gameplay unchanged.",
+            "version": "0.0.4",
+            "sts_version": "12-18-2022",
+            "mts_version": "3.30.3",
+            "dependencies": ["HololiveMod"]
+          }
+          EOF
+          mkdir -p dist
+          jar cf dist/HololiveFullArtTest-0.0.4.jar -C build/mod-classes . -C build/resources .
+          jar tf dist/HololiveFullArtTest-0.0.4.jar
+
+      - name: Upload Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HololiveFullArtTest-0.0.4
+          path: dist/HololiveFullArtTest-0.0.4.jar
+          if-no-files-found: error
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG='hololive-fullart-test-v0.0.4'
+          JAR='dist/HololiveFullArtTest-0.0.4.jar'
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$JAR" --clobber
+          else
+            gh release create "$TAG" "$JAR" --title 'Hololive Full Art Test v0.0.4' --notes 'Recovered confirmed Rindou conventions: left vertical type strip and bottom-right independent rarity layer. Title/description alignment remains vanilla because no reliable evidence for the old custom alignment has been recovered yet. Strike gameplay unchanged.'
+          fi
