@@ -1,0 +1,213 @@
+name: Build Hololive full-art test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-hololive-fullart-test.yml'
+      - 'hololive-fullart-test/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+
+      - name: Prepare compile stubs
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build
+          mkdir -p build/stubsrc/com/evacipated/cardcrawl/modthespire/lib
+          mkdir -p build/stubsrc/com/badlogic/gdx/graphics/g2d
+          mkdir -p build/stubsrc/com/badlogic/gdx/graphics
+          mkdir -p build/stubsrc/com/megacrit/cardcrawl/cards
+          mkdir -p build/stubsrc/com/megacrit/cardcrawl/core
+          mkdir -p build/stubsrc/com/megacrit/cardcrawl/helpers
+          mkdir -p build/stub-classes build/mod-classes build/resources/img/card/fullart
+
+          cat > build/stubsrc/com/evacipated/cardcrawl/modthespire/lib/SpirePatch.java <<'EOF'
+          package com.evacipated.cardcrawl.modthespire.lib;
+          import java.lang.annotation.ElementType;
+          import java.lang.annotation.Retention;
+          import java.lang.annotation.RetentionPolicy;
+          import java.lang.annotation.Target;
+          @Retention(RetentionPolicy.RUNTIME)
+          @Target(ElementType.TYPE)
+          public @interface SpirePatch {
+              Class<?> clz();
+              String method();
+          }
+          EOF
+
+          cat > build/stubsrc/com/evacipated/cardcrawl/modthespire/lib/SpireReturn.java <<'EOF'
+          package com.evacipated.cardcrawl.modthespire.lib;
+          public class SpireReturn<T> {
+              public static <T> SpireReturn<T> Return(T value) { return new SpireReturn<T>(); }
+              public static <T> SpireReturn<T> Continue() { return new SpireReturn<T>(); }
+          }
+          EOF
+
+          cat > build/stubsrc/com/badlogic/gdx/graphics/Color.java <<'EOF'
+          package com.badlogic.gdx.graphics;
+          public class Color {
+              public static final Color WHITE = new Color(1F,1F,1F,1F);
+              public Color(float r, float g, float b, float a) {}
+          }
+          EOF
+
+          cat > build/stubsrc/com/badlogic/gdx/graphics/Texture.java <<'EOF'
+          package com.badlogic.gdx.graphics;
+          public class Texture {
+              public int getWidth() { return 1; }
+              public int getHeight() { return 1; }
+          }
+          EOF
+
+          cat > build/stubsrc/com/badlogic/gdx/graphics/g2d/SpriteBatch.java <<'EOF'
+          package com.badlogic.gdx.graphics.g2d;
+          import com.badlogic.gdx.graphics.Color;
+          import com.badlogic.gdx.graphics.Texture;
+          public class SpriteBatch {
+              public void setColor(Color color) {}
+              public void draw(Texture texture, float x, float y, float originX, float originY,
+                               float width, float height, float scaleX, float scaleY, float rotation,
+                               int srcX, int srcY, int srcWidth, int srcHeight,
+                               boolean flipX, boolean flipY) {}
+          }
+          EOF
+
+          cat > build/stubsrc/com/megacrit/cardcrawl/cards/AbstractCard.java <<'EOF'
+          package com.megacrit.cardcrawl.cards;
+          public class AbstractCard {
+              public String cardID;
+              public float current_x;
+              public float current_y;
+              public float angle;
+              public float drawScale;
+              public float transparency;
+          }
+          EOF
+
+          cat > build/stubsrc/com/megacrit/cardcrawl/core/Settings.java <<'EOF'
+          package com.megacrit.cardcrawl.core;
+          public class Settings {
+              public static float scale = 1F;
+          }
+          EOF
+
+          cat > build/stubsrc/com/megacrit/cardcrawl/helpers/ImageMaster.java <<'EOF'
+          package com.megacrit.cardcrawl.helpers;
+          import com.badlogic.gdx.graphics.Texture;
+          public class ImageMaster {
+              public static Texture WHITE_SQUARE_IMG = new Texture();
+              public static Texture loadImage(String path) { return new Texture(); }
+          }
+          EOF
+
+          javac -source 8 -target 8 -d build/stub-classes $(find build/stubsrc -name '*.java')
+
+      - name: Compile patch only
+        shell: bash
+        run: |
+          set -euo pipefail
+          javac -source 8 -target 8 \
+            -cp build/stub-classes \
+            -d build/mod-classes \
+            hololive-fullart-test/src/main/java/hololivemod/patches/FullArtTestPatch.java
+
+      - name: Generate vertical placeholder test art
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import struct, zlib
+          from pathlib import Path
+          w, h = 832, 1216
+          rows = []
+          for y in range(h):
+              row = bytearray([0])
+              t = y / max(1, h - 1)
+              for x in range(w):
+                  checker = ((x // 64) + (y // 64)) & 1
+                  r = int(32 + 80 * (1.0 - t) + 22 * checker)
+                  g = int(28 + 18 * checker)
+                  b = int(38 + 72 * t + 24 * checker)
+                  # bright central guide to make crop/scale obvious in-game
+                  if abs(x - w // 2) < 4 or abs(y - h // 2) < 4:
+                      r, g, b = 235, 235, 235
+                  row.extend((r, g, b, 255))
+              rows.append(bytes(row))
+          raw = b''.join(rows)
+          def chunk(kind, data):
+              return (struct.pack('>I', len(data)) + kind + data +
+                      struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff))
+          png = b'\x89PNG\r\n\x1a\n'
+          png += chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0))
+          png += chunk(b'IDAT', zlib.compress(raw, 9))
+          png += chunk(b'IEND', b'')
+          out = Path('build/resources/img/card/fullart/fullart_test.png')
+          out.parent.mkdir(parents=True, exist_ok=True)
+          out.write_bytes(png)
+          print(out, len(png))
+          PY
+
+      - name: Write ModTheSpire metadata
+        shell: bash
+        run: |
+          cat > build/resources/ModTheSpire.json <<'EOF'
+          {
+            "modid": "HololiveFullArtTest",
+            "name": "Hololive Full Art Test",
+            "author_list": ["yukihira246"],
+            "description": "Rendering-only test. Makes Hololive_Strike use a near-full-card illustration while keeping its gameplay unchanged.",
+            "version": "0.0.1",
+            "sts_version": "12-18-2022",
+            "mts_version": "3.30.3",
+            "dependencies": ["HololiveMod"]
+          }
+          EOF
+
+      - name: Package test mod
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          jar cf dist/HololiveFullArtTest-0.0.1.jar \
+            -C build/mod-classes . \
+            -C build/resources .
+          jar tf dist/HololiveFullArtTest-0.0.1.jar
+
+      - name: Upload Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HololiveFullArtTest-0.0.1
+          path: dist/HololiveFullArtTest-0.0.1.jar
+          if-no-files-found: error
+
+      - name: Publish/update test release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG='hololive-fullart-test-v0.0.1'
+          JAR='dist/HololiveFullArtTest-0.0.1.jar'
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$JAR" --clobber
+          else
+            gh release create "$TAG" "$JAR" \
+              --title 'Hololive Full Art Test v0.0.1' \
+              --notes 'Temporary rendering-only test for Hololive_Strike. Uses a generated vertical placeholder image. No card gameplay values are changed.'
+          fi
