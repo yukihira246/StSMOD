@@ -1,0 +1,254 @@
+name: Build Hololive full-art test v0.0.6
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-hololive-fullart-test-v006.yml'
+      - 'hololive-fullart-test/src/main/java/hololivemod/patches/FullArtTestPatch.java'
+      - 'hololive-fullart-test/src/main/java/hololivemod/patches/DescriptionAlignmentPatch.java'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+
+      - name: Start from tested v0.0.5
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build dist
+          mkdir -p build/root build/stubsrc build/stub-classes dist
+          curl -fL --retry 3 \
+            'https://github.com/yukihira246/StSMOD/releases/download/hololive-fullart-test-v0.0.5/HololiveFullArtTest-0.0.5.jar' \
+            -o build/base.jar
+          (cd build/root && jar xf ../base.jar)
+
+      - name: Compile v0.0.6 patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/stubsrc/basemod
+          mkdir -p build/stubsrc/com/evacipated/cardcrawl/modthespire/lib
+          mkdir -p build/stubsrc/com/badlogic/gdx/files
+          mkdir -p build/stubsrc/com/badlogic/gdx/graphics/g2d
+          mkdir -p build/stubsrc/com/badlogic/gdx/graphics
+          mkdir -p build/stubsrc/com/badlogic/gdx
+          mkdir -p build/stubsrc/com/megacrit/cardcrawl/cards
+          mkdir -p build/stubsrc/com/megacrit/cardcrawl/core
+          mkdir -p build/stubsrc/com/megacrit/cardcrawl/helpers
+          mkdir -p build/stubsrc/com/megacrit/cardcrawl/screens
+
+          cat > build/stubsrc/basemod/ReflectionHacks.java <<'EOF'
+          package basemod;
+          public final class ReflectionHacks {
+              public static <T> T getPrivate(Object obj, Class<?> cls, String fieldName) { return null; }
+          }
+          EOF
+
+          cat > build/stubsrc/com/evacipated/cardcrawl/modthespire/lib/SpirePatch.java <<'EOF'
+          package com.evacipated.cardcrawl.modthespire.lib;
+          import java.lang.annotation.ElementType;
+          import java.lang.annotation.Retention;
+          import java.lang.annotation.RetentionPolicy;
+          import java.lang.annotation.Target;
+          @Retention(RetentionPolicy.RUNTIME)
+          @Target(ElementType.TYPE)
+          public @interface SpirePatch { Class<?> clz(); String method(); }
+          EOF
+
+          cat > build/stubsrc/com/evacipated/cardcrawl/modthespire/lib/SpireReturn.java <<'EOF'
+          package com.evacipated.cardcrawl.modthespire.lib;
+          public class SpireReturn<T> {
+              public static <T> SpireReturn<T> Return(T value) { return new SpireReturn<T>(); }
+              public static <T> SpireReturn<T> Continue() { return new SpireReturn<T>(); }
+          }
+          EOF
+
+          cat > build/stubsrc/com/badlogic/gdx/files/FileHandle.java <<'EOF'
+          package com.badlogic.gdx.files;
+          public class FileHandle { public boolean exists(){ return true; } }
+          EOF
+
+          cat > build/stubsrc/com/badlogic/gdx/Files.java <<'EOF'
+          package com.badlogic.gdx;
+          import com.badlogic.gdx.files.FileHandle;
+          public interface Files { FileHandle absolute(String path); }
+          EOF
+
+          cat > build/stubsrc/com/badlogic/gdx/Gdx.java <<'EOF'
+          package com.badlogic.gdx;
+          public class Gdx { public static Files files; }
+          EOF
+
+          cat > build/stubsrc/com/badlogic/gdx/graphics/Color.java <<'EOF'
+          package com.badlogic.gdx.graphics;
+          public class Color {
+              public static final Color WHITE = new Color(1F,1F,1F,1F);
+              public Color(float r,float g,float b,float a) {}
+          }
+          EOF
+
+          cat > build/stubsrc/com/badlogic/gdx/graphics/Texture.java <<'EOF'
+          package com.badlogic.gdx.graphics;
+          import com.badlogic.gdx.files.FileHandle;
+          public class Texture {
+              public Texture() {}
+              public Texture(FileHandle f) {}
+              public int getWidth(){return 1;}
+              public int getHeight(){return 1;}
+          }
+          EOF
+
+          cat > build/stubsrc/com/badlogic/gdx/graphics/g2d/SpriteBatch.java <<'EOF'
+          package com.badlogic.gdx.graphics.g2d;
+          import com.badlogic.gdx.graphics.Color;
+          import com.badlogic.gdx.graphics.Texture;
+          public class SpriteBatch {
+              public void setColor(Color c) {}
+              public void draw(Texture t,float x,float y,float ox,float oy,float w,float h,float sx,float sy,float r,int srcX,int srcY,int srcW,int srcH,boolean fx,boolean fy) {}
+          }
+          EOF
+
+          cat > build/stubsrc/com/megacrit/cardcrawl/cards/DescriptionLine.java <<'EOF'
+          package com.megacrit.cardcrawl.cards;
+          public class DescriptionLine { public float width; }
+          EOF
+
+          cat > build/stubsrc/com/megacrit/cardcrawl/cards/AbstractCard.java <<'EOF'
+          package com.megacrit.cardcrawl.cards;
+          import java.util.ArrayList;
+          public class AbstractCard {
+              public String cardID;
+              public float current_x,current_y,angle,drawScale,transparency;
+              public ArrayList<DescriptionLine> description;
+          }
+          EOF
+
+          cat > build/stubsrc/com/megacrit/cardcrawl/core/Settings.java <<'EOF'
+          package com.megacrit.cardcrawl.core;
+          public class Settings { public static float scale=1F; public static int WIDTH=1920; public static int HEIGHT=1080; }
+          EOF
+
+          cat > build/stubsrc/com/megacrit/cardcrawl/helpers/ImageMaster.java <<'EOF'
+          package com.megacrit.cardcrawl.helpers;
+          import com.badlogic.gdx.graphics.Texture;
+          public class ImageMaster {
+              public static Texture WHITE_SQUARE_IMG=new Texture();
+              public static Texture loadImage(String p){return new Texture();}
+          }
+          EOF
+
+          cat > build/stubsrc/com/megacrit/cardcrawl/screens/SingleCardViewPopup.java <<'EOF'
+          package com.megacrit.cardcrawl.screens;
+          public class SingleCardViewPopup {}
+          EOF
+
+          javac -source 8 -target 8 -d build/stub-classes $(find build/stubsrc -name '*.java')
+          javac -source 8 -target 8 -cp build/stub-classes -d build/root \
+            hololive-fullart-test/src/main/java/hololivemod/patches/FullArtTestPatch.java \
+            hololive-fullart-test/src/main/java/hololivemod/patches/DescriptionAlignmentPatch.java
+
+      - name: Tighten normal-size type strip only
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk
+          python3 -m pip install --quiet pillow
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageDraw, ImageFont
+          import glob
+
+          out = Path('build/root/img/card/fullart')
+          font_path = (glob.glob('/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc') +
+                       glob.glob('/usr/share/fonts/**/NotoSansCJK*.ttc', recursive=True))[0]
+          type_font = ImageFont.truetype(font_path, 13)
+
+          # Rebuild only the normal 512 overlay. The 1024 popup overlay from v0.0.5 is intentionally preserved.
+          frame = Image.new('RGBA', (512,512), (0,0,0,0))
+          d = ImageDraw.Draw(frame)
+          d.rounded_rectangle((104,44,408,468), radius=21, outline=(25,10,34,215), width=4)
+          d.rounded_rectangle((106,46,406,466), radius=19, outline=(231,186,79,230), width=2)
+          d.rounded_rectangle((110,50,402,462), radius=15, outline=(112,52,143,180), width=1)
+
+          d.rounded_rectangle((142,64,387,99), radius=11,
+                              fill=(30,12,42,145), outline=(220,177,77,198), width=1)
+          d.line((158,98,371,98), fill=(116,58,146,160), width=1)
+
+          # Normal-size strip reduced from 25px to 21px and font reduced from 15px to 13px.
+          d.rounded_rectangle((108,158,129,272), radius=7,
+                              fill=(91,18,34,198), outline=(230,181,76,215), width=1)
+          d.line((127,166,127,264), fill=(158,49,61,165), width=1)
+          d.line((113,168,124,179), fill=(244,224,166,230), width=2)
+          d.line((123,166,113,180), fill=(244,224,166,230), width=1)
+          for ch,y in zip(['ア','タ','ッ','ク'], [194,212,230,248]):
+              bbox = d.textbbox((0,0), ch, font=type_font)
+              tw = bbox[2]-bbox[0]
+              d.text((118.5-tw/2,y), ch, font=type_font, fill=(255,244,215,235))
+
+          d.rounded_rectangle((124,330,390,438), radius=14,
+                              fill=(17,8,27,155), outline=(200,162,88,190), width=1)
+          d.line((141,330,373,330), fill=(117,55,147,155), width=1)
+
+          for x,y,sx,sy in [(116,57,1,1),(396,57,-1,1),(116,455,1,-1),(396,455,-1,-1)]:
+              d.line((x,y,x+sx*13,y), fill=(220,174,73,165), width=1)
+              d.line((x,y,x,y+sy*13), fill=(220,174,73,165), width=1)
+
+          frame.save(out/'frame_attack_512.png')
+          PY
+
+      - name: Update metadata and package
+        shell: bash
+        run: |
+          cat > build/root/ModTheSpire.json <<'EOF'
+          {
+            "modid": "HololiveFullArtTest",
+            "name": "Hololive Full Art Test",
+            "author_list": ["yukihira246"],
+            "description": "v0.0.6: optional external Chloe test art from mods/hololive_fullart_test_chloe.png; normal description shifted right; normal ATTACK strip compacted; popup layout kept from v0.0.5. Strike gameplay unchanged.",
+            "version": "0.0.6",
+            "sts_version": "12-18-2022",
+            "mts_version": "3.30.3",
+            "dependencies": ["HololiveMod"]
+          }
+          EOF
+          rm -f build/root/META-INF/MANIFEST.MF
+          jar cf dist/HololiveFullArtTest-0.0.6.jar -C build/root .
+          jar tf dist/HololiveFullArtTest-0.0.6.jar | sort
+
+      - name: Upload Actions artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HololiveFullArtTest-0.0.6
+          path: dist/HololiveFullArtTest-0.0.6.jar
+          if-no-files-found: error
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG='hololive-fullart-test-v0.0.6'
+          JAR='dist/HololiveFullArtTest-0.0.6.jar'
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$JAR" --clobber
+          else
+            gh release create "$TAG" "$JAR" \
+              --title 'Hololive Full Art Test v0.0.6' \
+              --notes 'Visual-only test. Put hololive_fullart_test_chloe.png next to the JAR in the SlayTheSpire/mods folder to use the supplied Chloe illustration; otherwise the embedded checker fallback is used. Normal description begins slightly farther right and the normal-size vertical ATTACK strip is smaller. Popup layout is unchanged from v0.0.5. The magnifying-glass icon seen in Card Library screenshots is the vanilla INSPECT cursor and is intentionally untouched. Strike gameplay is unchanged.'
+          fi
