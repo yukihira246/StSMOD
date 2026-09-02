@@ -17,12 +17,10 @@ import com.megacrit.cardcrawl.screens.SingleCardViewPopup;
 public final class DescriptionAlignmentPatch {
     private static final String TEST_CARD_ID = "Hololive_Strike";
 
-    // AbstractCard uses startX = currentX - width * drawScale / 2.
-    // 230px therefore produces an approximately 115px left inset at drawScale 1.
-    private static final float NORMAL_FORCED_WIDTH = 230.0F;
+    // v0.0.6: move normal-size text slightly right compared with v0.0.5.
+    private static final float NORMAL_FORCED_WIDTH = 210.0F;
 
-    // SingleCardViewPopup renders at drawScale 2 and also applies its own small
-    // horizontal inset. 230px keeps the text comfortably inside the large panel.
+    // Large popup placement already looked good in v0.0.5, so keep it unchanged.
     private static final float POPUP_FORCED_WIDTH = 230.0F;
 
     private static float[] normalBackup;
