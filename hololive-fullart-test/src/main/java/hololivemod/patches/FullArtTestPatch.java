@@ -12,42 +12,42 @@ import com.megacrit.cardcrawl.helpers.ImageMaster;
 import com.megacrit.cardcrawl.screens.SingleCardViewPopup;
 
 /**
- * Full-art rendering test for Hololive_Strike.
+ * Foundation/Rindou-style layered full-art test for Hololive_Strike.
  *
- * Gameplay is untouched. This patch only replaces the visual card surface.
- * Normal cards use the old Rindou/Foundation full-art baseline of 296x414.
- * Single-card view uses 600x840. The source image keeps its aspect ratio
- * and is CONTAIN-fit, never stretched or cropped.
+ * Gameplay is untouched. The visual surface is composed as:
+ *   art -> transparent frame -> transparent rarity marker -> vanilla text/cost.
+ *
+ * Foundation baseline:
+ *   normal art : 296 x 414
+ *   detail art : 600 x 840
+ *   frame      : 512 x 512 / 1024 x 1024 transparent PNG
  */
 public final class FullArtTestPatch {
     private static final String TEST_CARD_ID = "Hololive_Strike";
-    private static final String TEST_ART_PATH = "img/card/fullart/fullart_test.png";
+
+    private static final String ART_PATH = "img/card/fullart/fullart_test.png";
+    private static final String FRAME_512_PATH = "img/card/fullart/frame_attack_512.png";
+    private static final String FRAME_1024_PATH = "img/card/fullart/frame_attack_1024.png";
+    private static final String RARITY_512_PATH = "img/card/fullart/rarity_special_512.png";
+    private static final String RARITY_1024_PATH = "img/card/fullart/rarity_special_1024.png";
 
     private static final float NORMAL_BASE_W = 300.0F;
     private static final float NORMAL_BASE_H = 420.0F;
     private static final float NORMAL_ART_W = 296.0F;
     private static final float NORMAL_ART_H = 414.0F;
+    private static final float NORMAL_OVERLAY_SIZE = 512.0F;
 
     private static final float POPUP_BASE_W = 608.0F;
     private static final float POPUP_BASE_H = 848.0F;
     private static final float POPUP_ART_W = 600.0F;
     private static final float POPUP_ART_H = 840.0F;
+    private static final float POPUP_OVERLAY_SIZE = 1024.0F;
 
-    private static final float NORMAL_DESC_W = 270.0F;
-    private static final float NORMAL_DESC_H = 112.0F;
-    private static final float NORMAL_DESC_Y = -126.0F;
-    private static final float NORMAL_TITLE_W = 236.0F;
-    private static final float NORMAL_TITLE_H = 38.0F;
-    private static final float NORMAL_TITLE_Y = 174.0F;
-
-    private static final float POPUP_DESC_W = 548.0F;
-    private static final float POPUP_DESC_H = 224.0F;
-    private static final float POPUP_DESC_Y = -252.0F;
-    private static final float POPUP_TITLE_W = 480.0F;
-    private static final float POPUP_TITLE_H = 76.0F;
-    private static final float POPUP_TITLE_Y = 348.0F;
-
-    private static Texture testArt;
+    private static Texture art;
+    private static Texture frame512;
+    private static Texture frame1024;
+    private static Texture rarity512;
+    private static Texture rarity1024;
 
     private FullArtTestPatch() {
     }
@@ -56,17 +56,38 @@ public final class FullArtTestPatch {
         return card != null && TEST_CARD_ID.equals(card.cardID);
     }
 
-    private static Texture getTestArt() {
-        if (testArt == null) {
-            testArt = ImageMaster.loadImage(TEST_ART_PATH);
-        }
-        return testArt;
+    private static Texture load(Texture current, String path) {
+        return current != null ? current : ImageMaster.loadImage(path);
+    }
+
+    private static Texture art() {
+        art = load(art, ART_PATH);
+        return art;
+    }
+
+    private static Texture frame512() {
+        frame512 = load(frame512, FRAME_512_PATH);
+        return frame512;
+    }
+
+    private static Texture frame1024() {
+        frame1024 = load(frame1024, FRAME_1024_PATH);
+        return frame1024;
+    }
+
+    private static Texture rarity512() {
+        rarity512 = load(rarity512, RARITY_512_PATH);
+        return rarity512;
+    }
+
+    private static Texture rarity1024() {
+        rarity1024 = load(rarity1024, RARITY_1024_PATH);
+        return rarity1024;
     }
 
     private static void drawCardTexture(SpriteBatch sb,
                                         AbstractCard card,
                                         Texture texture,
-                                        float localCenterY,
                                         float rawWidth,
                                         float rawHeight,
                                         Color color) {
@@ -76,15 +97,10 @@ public final class FullArtTestPatch {
 
         float width = rawWidth * Settings.scale;
         float height = rawHeight * Settings.scale;
-        double radians = Math.toRadians(card.angle);
-        float offset = localCenterY * Settings.scale * card.drawScale;
-        float centerX = card.current_x - (float) Math.sin(radians) * offset;
-        float centerY = card.current_y + (float) Math.cos(radians) * offset;
-
         sb.setColor(color);
         sb.draw(texture,
-                centerX - width / 2.0F,
-                centerY - height / 2.0F,
+                card.current_x - width / 2.0F,
+                card.current_y - height / 2.0F,
                 width / 2.0F,
                 height / 2.0F,
                 width,
@@ -110,32 +126,34 @@ public final class FullArtTestPatch {
             return;
         }
         float scale = Math.min(boxW / texture.getWidth(), boxH / texture.getHeight());
-        drawCardTexture(sb, card, texture, 0.0F,
+        drawCardTexture(sb, card, texture,
                 texture.getWidth() * scale,
                 texture.getHeight() * scale,
                 color);
     }
 
-    private static void drawNormalSurface(SpriteBatch sb, AbstractCard card) {
+    private static void drawNormalArt(SpriteBatch sb, AbstractCard card) {
         float alpha = card.transparency;
 
-        // A neutral 2px-ish edge replaces the colored vanilla card body.
-        drawCardTexture(sb, card, ImageMaster.WHITE_SQUARE_IMG, 0.0F,
+        // Neutral underlay only covers any letterbox area left by CONTAIN fitting.
+        drawCardTexture(sb, card, ImageMaster.WHITE_SQUARE_IMG,
                 NORMAL_BASE_W, NORMAL_BASE_H,
-                new Color(0.035F, 0.035F, 0.045F, alpha));
+                new Color(0.018F, 0.022F, 0.030F, alpha));
 
-        // Rindou/Foundation full-art baseline: preserve aspect ratio, CONTAIN fit.
-        drawCardContain(sb, card, getTestArt(), NORMAL_ART_W, NORMAL_ART_H,
+        // Full art first.
+        drawCardContain(sb, card, art(), NORMAL_ART_W, NORMAL_ART_H,
                 new Color(1.0F, 1.0F, 1.0F, alpha));
 
-        // Minimal readability overlays only. No blue vanilla body/frame/banner.
-        drawCardTexture(sb, card, ImageMaster.WHITE_SQUARE_IMG, NORMAL_TITLE_Y,
-                NORMAL_TITLE_W, NORMAL_TITLE_H,
-                new Color(0.0F, 0.0F, 0.0F, 0.42F * alpha));
-        drawCardTexture(sb, card, ImageMaster.WHITE_SQUARE_IMG, NORMAL_DESC_Y,
-                NORMAL_DESC_W, NORMAL_DESC_H,
-                new Color(0.0F, 0.0F, 0.0F, 0.56F * alpha));
+        sb.setColor(Color.WHITE);
+    }
 
+    private static void drawNormalOverlay(SpriteBatch sb, AbstractCard card) {
+        float alpha = card.transparency;
+        Color white = new Color(1.0F, 1.0F, 1.0F, alpha);
+
+        // Foundation model: frame and rarity are independent transparent layers.
+        drawCardTexture(sb, card, frame512(), NORMAL_OVERLAY_SIZE, NORMAL_OVERLAY_SIZE, white);
+        drawCardTexture(sb, card, rarity512(), NORMAL_OVERLAY_SIZE, NORMAL_OVERLAY_SIZE, white);
         sb.setColor(Color.WHITE);
     }
 
@@ -191,30 +209,34 @@ public final class FullArtTestPatch {
         return ReflectionHacks.getPrivate(popup, SingleCardViewPopup.class, "card");
     }
 
-    private static void drawPopupSurface(SpriteBatch sb) {
+    private static void drawPopupArt(SpriteBatch sb) {
         float cx = Settings.WIDTH / 2.0F;
         float cy = Settings.HEIGHT / 2.0F;
 
         drawScreenTexture(sb, ImageMaster.WHITE_SQUARE_IMG, cx, cy,
                 POPUP_BASE_W, POPUP_BASE_H,
-                new Color(0.035F, 0.035F, 0.045F, 1.0F));
-        drawScreenContain(sb, getTestArt(), cx, cy,
+                new Color(0.018F, 0.022F, 0.030F, 1.0F));
+        drawScreenContain(sb, art(), cx, cy,
                 POPUP_ART_W, POPUP_ART_H,
                 Color.WHITE);
-        drawScreenTexture(sb, ImageMaster.WHITE_SQUARE_IMG, cx,
-                cy + POPUP_TITLE_Y * Settings.scale,
-                POPUP_TITLE_W, POPUP_TITLE_H,
-                new Color(0.0F, 0.0F, 0.0F, 0.42F));
-        drawScreenTexture(sb, ImageMaster.WHITE_SQUARE_IMG, cx,
-                cy + POPUP_DESC_Y * Settings.scale,
-                POPUP_DESC_W, POPUP_DESC_H,
-                new Color(0.0F, 0.0F, 0.0F, 0.56F));
+        sb.setColor(Color.WHITE);
+    }
+
+    private static void drawPopupOverlay(SpriteBatch sb) {
+        float cx = Settings.WIDTH / 2.0F;
+        float cy = Settings.HEIGHT / 2.0F;
+        drawScreenTexture(sb, frame1024(), cx, cy,
+                POPUP_OVERLAY_SIZE, POPUP_OVERLAY_SIZE,
+                Color.WHITE);
+        drawScreenTexture(sb, rarity1024(), cx, cy,
+                POPUP_OVERLAY_SIZE, POPUP_OVERLAY_SIZE,
+                Color.WHITE);
         sb.setColor(Color.WHITE);
     }
 
     /**
-     * Replace the complete vanilla image layer, not just the portrait.
-     * AbstractCard renders type/title/description/cost afterwards, so those stay intact.
+     * Replace the complete vanilla image layer. Text/type/description/cost are
+     * rendered by AbstractCard afterwards, so they stay at the standard positions.
      */
     @SpirePatch(clz = AbstractCard.class, method = "renderImage")
     public static class NormalRenderImagePatch {
@@ -225,23 +247,25 @@ public final class FullArtTestPatch {
             if (!applies(__instance)) {
                 return SpireReturn.Continue();
             }
-            drawNormalSurface(sb, __instance);
+            drawNormalArt(sb, __instance);
+            drawNormalOverlay(sb, __instance);
             return SpireReturn.Return(null);
         }
     }
 
-    /** Replace the large-view card body with the same full-art rule. */
+    /** Large-view art layer. */
     @SpirePatch(clz = SingleCardViewPopup.class, method = "renderCardBack")
     public static class PopupCardBackPatch {
         public static SpireReturn<Void> Prefix(SingleCardViewPopup __instance, SpriteBatch sb) {
             if (!applies(popupCard(__instance))) {
                 return SpireReturn.Continue();
             }
-            drawPopupSurface(sb);
+            drawPopupArt(sb);
             return SpireReturn.Return(null);
         }
     }
 
+    /** Normal portrait is already represented by the full art. */
     @SpirePatch(clz = SingleCardViewPopup.class, method = "renderPortrait")
     public static class PopupPortraitPatch {
         public static SpireReturn<Void> Prefix(SingleCardViewPopup __instance, SpriteBatch sb) {
@@ -249,13 +273,19 @@ public final class FullArtTestPatch {
         }
     }
 
+    /** Draw the independent 1024 frame + rarity layers at the frame stage. */
     @SpirePatch(clz = SingleCardViewPopup.class, method = "renderFrame")
     public static class PopupFramePatch {
         public static SpireReturn<Void> Prefix(SingleCardViewPopup __instance, SpriteBatch sb) {
-            return applies(popupCard(__instance)) ? SpireReturn.Return(null) : SpireReturn.Continue();
+            if (!applies(popupCard(__instance))) {
+                return SpireReturn.Continue();
+            }
+            drawPopupOverlay(sb);
+            return SpireReturn.Return(null);
         }
     }
 
+    /** Rarity is now its own layer, so suppress the vanilla banner. */
     @SpirePatch(clz = SingleCardViewPopup.class, method = "renderCardBanner")
     public static class PopupBannerPatch {
         public static SpireReturn<Void> Prefix(SingleCardViewPopup __instance, SpriteBatch sb) {
