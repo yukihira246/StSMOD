@@ -6,6 +6,11 @@ on:
     paths:
       - '.github/workflows/build-hololive-fullart-test.yml'
       - 'hololive-fullart-test/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-hololive-fullart-test.yml'
+      - 'hololive-fullart-test/**'
   workflow_dispatch:
 
 permissions:
@@ -144,7 +149,6 @@ jobs:
                   r = int(32 + 80 * (1.0 - t) + 22 * checker)
                   g = int(28 + 18 * checker)
                   b = int(38 + 72 * t + 24 * checker)
-                  # bright central guide to make crop/scale obvious in-game
                   if abs(x - w // 2) < 4 or abs(y - h // 2) < 4:
                       r, g, b = 235, 235, 235
                   row.extend((r, g, b, 255))
@@ -197,6 +201,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish/update test release
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
