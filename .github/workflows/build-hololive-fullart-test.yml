@@ -148,39 +148,167 @@ jobs:
             -d build/mod-classes \
             hololive-fullart-test/src/main/java/hololivemod/patches/FullArtTestPatch.java
 
-      - name: Generate vertical placeholder test art
+      - name: Generate test art and Foundation-style overlay layers
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import struct, zlib
           from pathlib import Path
+
+          OUT = Path('build/resources/img/card/fullart')
+          OUT.mkdir(parents=True, exist_ok=True)
+
+          def png_bytes(w, h, rgba):
+              rows = []
+              stride = w * 4
+              for y in range(h):
+                  rows.append(b'\x00' + bytes(rgba[y*stride:(y+1)*stride]))
+              raw = b''.join(rows)
+              def chunk(kind, data):
+                  return (struct.pack('>I', len(data)) + kind + data +
+                          struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff))
+              out = b'\x89PNG\r\n\x1a\n'
+              out += chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0))
+              out += chunk(b'IDAT', zlib.compress(raw, 9))
+              out += chunk(b'IEND', b'')
+              return out
+
+          def save(path, w, h, rgba):
+              path.write_bytes(png_bytes(w, h, rgba))
+              print(path, path.stat().st_size)
+
+          def new_img(w, h):
+              return bytearray(w * h * 4)
+
+          def put(img, w, h, x, y, c):
+              if 0 <= x < w and 0 <= y < h:
+                  i = (y*w + x)*4
+                  img[i:i+4] = bytes(c)
+
+          def blend(img, w, h, x, y, c):
+              if not (0 <= x < w and 0 <= y < h):
+                  return
+              i = (y*w + x)*4
+              sr, sg, sb, sa = c
+              if sa == 255:
+                  img[i:i+4] = bytes(c)
+                  return
+              dr, dg, db, da = img[i:i+4]
+              a = sa / 255.0
+              oa = a + (da / 255.0) * (1.0 - a)
+              if oa <= 0:
+                  return
+              r = int((sr*a + dr*(da/255.0)*(1-a)) / oa)
+              g = int((sg*a + dg*(da/255.0)*(1-a)) / oa)
+              b = int((sb*a + db*(da/255.0)*(1-a)) / oa)
+              img[i:i+4] = bytes((r, g, b, int(oa*255)))
+
+          def inside_rr(x, y, x0, y0, x1, y1, r):
+              if x < x0 or y < y0 or x >= x1 or y >= y1:
+                  return False
+              cx = x0 + r if x < x0+r else (x1-r-1 if x >= x1-r else x)
+              cy = y0 + r if y < y0+r else (y1-r-1 if y >= y1-r else y)
+              dx, dy = x-cx, y-cy
+              return dx*dx + dy*dy <= r*r
+
+          def fill_rr(img, w, h, x0, y0, x1, y1, r, c):
+              for y in range(max(0,y0), min(h,y1)):
+                  for x in range(max(0,x0), min(w,x1)):
+                      if inside_rr(x,y,x0,y0,x1,y1,r):
+                          blend(img,w,h,x,y,c)
+
+          def ring_rr(img, w, h, x0, y0, x1, y1, r, t, c):
+              ix0, iy0, ix1, iy1 = x0+t, y0+t, x1-t, y1-t
+              ir = max(1, r-t)
+              for y in range(max(0,y0), min(h,y1)):
+                  for x in range(max(0,x0), min(w,x1)):
+                      if inside_rr(x,y,x0,y0,x1,y1,r) and not inside_rr(x,y,ix0,iy0,ix1,iy1,ir):
+                          blend(img,w,h,x,y,c)
+
+          def fill_rect(img,w,h,x0,y0,x1,y1,c):
+              for y in range(max(0,y0), min(h,y1)):
+                  for x in range(max(0,x0), min(w,x1)):
+                      blend(img,w,h,x,y,c)
+
+          def diamond(img,w,h,cx,cy,rx,ry,c):
+              for y in range(cy-ry, cy+ry+1):
+                  for x in range(cx-rx, cx+rx+1):
+                      if abs(x-cx)/float(max(1,rx)) + abs(y-cy)/float(max(1,ry)) <= 1.0:
+                          blend(img,w,h,x,y,c)
+
+          def upscale2(src, w, h):
+              dst = new_img(w*2, h*2)
+              for y in range(h):
+                  for x in range(w):
+                      si=(y*w+x)*4
+                      c=src[si:si+4]
+                      for yy in (y*2,y*2+1):
+                          for xx in (x*2,x*2+1):
+                              di=(yy*(w*2)+xx)*4
+                              dst[di:di+4]=c
+              return dst
+
+          # Vertical placeholder. Actual user art can later replace this file only.
           w, h = 832, 1216
-          rows = []
+          art = new_img(w,h)
           for y in range(h):
-              row = bytearray([0])
-              t = y / max(1, h - 1)
+              t = y / max(1, h-1)
               for x in range(w):
-                  checker = ((x // 64) + (y // 64)) & 1
-                  r = int(32 + 80 * (1.0 - t) + 22 * checker)
-                  g = int(28 + 18 * checker)
-                  b = int(38 + 72 * t + 24 * checker)
-                  if abs(x - w // 2) < 4 or abs(y - h // 2) < 4:
-                      r, g, b = 235, 235, 235
-                  row.extend((r, g, b, 255))
-              rows.append(bytes(row))
-          raw = b''.join(rows)
-          def chunk(kind, data):
-              return (struct.pack('>I', len(data)) + kind + data +
-                      struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff))
-          png = b'\x89PNG\r\n\x1a\n'
-          png += chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0))
-          png += chunk(b'IDAT', zlib.compress(raw, 9))
-          png += chunk(b'IEND', b'')
-          out = Path('build/resources/img/card/fullart/fullart_test.png')
-          out.parent.mkdir(parents=True, exist_ok=True)
-          out.write_bytes(png)
-          print(out, len(png))
+                  checker = ((x//64)+(y//64)) & 1
+                  c = (int(48+74*(1-t)+22*checker),
+                       int(22+26*checker),
+                       int(55+92*t+26*checker), 255)
+                  if abs(x-w//2) < 4 or abs(y-h//2) < 4:
+                      c=(238,238,238,255)
+                  put(art,w,h,x,y,c)
+          save(OUT/'fullart_test.png',w,h,art)
+
+          # Foundation convention: 512 square transparent layer, card centered at 300x420.
+          fw=fh=512
+          frame=new_img(fw,fh)
+          x0,y0,x1,y1=106,46,406,466
+
+          # Outer card silhouette: dark under-ring + silver/blue attack accent.
+          ring_rr(frame,fw,fh,x0-3,y0-3,x1+3,y1+3,22,10,(8,12,18,235))
+          ring_rr(frame,fw,fh,x0,y0,x1,y1,19,5,(188,210,224,245))
+          ring_rr(frame,fw,fh,x0+5,y0+5,x1-5,y1-5,15,2,(42,190,224,235))
+
+          # Title plate centered around vanilla title Y (+175 local => about y=81 in texture).
+          fill_rr(frame,fw,fh,132,62,384,102,14,(8,12,18,178))
+          ring_rr(frame,fw,fh,132,62,384,102,14,2,(185,209,224,220))
+          fill_rect(frame,fw,fh,149,62,367,65,(42,190,224,210))
+
+          # Type plaque behind vanilla ATTACK text at card center.
+          fill_rr(frame,fw,fh,190,242,322,270,12,(8,12,18,180))
+          ring_rr(frame,fw,fh,190,242,322,270,12,2,(185,209,224,220))
+          fill_rect(frame,fw,fh,204,268,308,271,(42,190,224,210))
+
+          # Integrated description panel rather than a raw black rectangle.
+          fill_rr(frame,fw,fh,121,326,391,440,16,(5,8,13,190))
+          ring_rr(frame,fw,fh,121,326,391,440,16,2,(154,178,194,210))
+          fill_rect(frame,fw,fh,139,326,373,329,(42,190,224,195))
+
+          # Small corner ornaments to make frame feel intentional while staying generic.
+          for xa, ya, sx, sy in [(116,58,1,1),(396,58,-1,1),(116,454,1,-1),(396,454,-1,-1)]:
+              for k in range(3):
+                  fill_rect(frame,fw,fh, xa if sx>0 else xa-22-k*4, ya+k*4 if sy>0 else ya-4-k*4,
+                            xa+22+k*4 if sx>0 else xa, ya+3+k*4 if sy>0 else ya-1-k*4,
+                            (42,190,224,205-k*25))
+
+          save(OUT/'frame_attack_512.png',fw,fh,frame)
+          frame1024=upscale2(frame,fw,fh)
+          save(OUT/'frame_attack_1024.png',1024,1024,frame1024)
+
+          # SPECIAL rarity is a separate layer, per Foundation registry design.
+          rarity=new_img(fw,fh)
+          diamond(rarity,fw,fh,256,456,15,10,(12,18,25,235))
+          diamond(rarity,fw,fh,256,454,11,8,(220,232,240,250))
+          diamond(rarity,fw,fh,256,453,6,5,(62,213,238,255))
+          put(rarity,fw,fh,256,450,(255,255,255,255))
+          save(OUT/'rarity_special_512.png',fw,fh,rarity)
+          rarity1024=upscale2(rarity,fw,fh)
+          save(OUT/'rarity_special_1024.png',1024,1024,rarity1024)
           PY
 
       - name: Write ModTheSpire metadata
@@ -191,8 +319,8 @@ jobs:
             "modid": "HololiveFullArtTest",
             "name": "Hololive Full Art Test",
             "author_list": ["yukihira246"],
-            "description": "Rendering-only v0.0.2 test. Replaces Hololive_Strike's vanilla blue image surface with Rindou-style full art in normal and single-card views. Gameplay is unchanged.",
-            "version": "0.0.2",
+            "description": "Rendering-only v0.0.3 test. Hololive_Strike uses Foundation/Rindou layered full art: separate art, transparent frame, and rarity layers in normal and single-card views. Gameplay is unchanged.",
+            "version": "0.0.3",
             "sts_version": "12-18-2022",
             "mts_version": "3.30.3",
             "dependencies": ["HololiveMod"]
@@ -204,16 +332,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          jar cf dist/HololiveFullArtTest-0.0.2.jar \
+          jar cf dist/HololiveFullArtTest-0.0.3.jar \
             -C build/mod-classes . \
             -C build/resources .
-          jar tf dist/HololiveFullArtTest-0.0.2.jar
+          jar tf dist/HololiveFullArtTest-0.0.3.jar
 
       - name: Upload Actions artifact
         uses: actions/upload-artifact@v4
         with:
-          name: HololiveFullArtTest-0.0.2
-          path: dist/HololiveFullArtTest-0.0.2.jar
+          name: HololiveFullArtTest-0.0.3
+          path: dist/HololiveFullArtTest-0.0.3.jar
           if-no-files-found: error
 
       - name: Publish/update test release
@@ -223,12 +351,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG='hololive-fullart-test-v0.0.2'
-          JAR='dist/HololiveFullArtTest-0.0.2.jar'
+          TAG='hololive-fullart-test-v0.0.3'
+          JAR='dist/HololiveFullArtTest-0.0.3.jar'
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$JAR" --clobber
           else
             gh release create "$TAG" "$JAR" \
-              --title 'Hololive Full Art Test v0.0.2' \
-              --notes 'Rindou-style rendering test for Hololive_Strike: vanilla blue image surface removed, 296x414 normal full art and 600x840 single-card full art, source aspect ratio preserved. No card gameplay values are changed. Placeholder art is still used for layout testing.'
+              --title 'Hololive Full Art Test v0.0.3' \
+              --notes 'Foundation/Rindou layered rendering test for Hololive_Strike. Art 296x414 / 600x840; independent transparent frame 512/1024; independent SPECIAL rarity layer; vanilla title/type/description/cost remain. Gameplay unchanged.'
           fi
